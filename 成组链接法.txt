@@ -1,0 +1,241 @@
+#include<stdio.h>
+#include<stdlib.h>
+#include<string.h>
+#include<unistd.h>
+
+#define BLOCKSIZ 512 //磁盘块大小
+#define NICFREE 10 //每组的块数
+#define FILEBLK 25 //文件区的磁盘块总数
+#define DATASTART 11 //文件区的开始数
+struct filsys //超级块部分数据结构
+{
+	unsigned int s_nfree; //空闲盘块数
+	unsigned short s_pfree; //空闲盘块指针
+	unsigned int s_free[NICFREE];//空闲盘块堆栈
+};
+
+void bwrite(unsigned int ino,unsigned int *buf);
+void bread(unsigned int ino,unsigned int *buf);
+void display();
+void balloc();
+void bfree();
+struct filsys filsys1;
+FILE *fd;
+int count;
+int main()
+{
+	int i;
+	int j;
+	
+	
+	
+	char input[8];
+	char inputBalloc[8] = "alloc";
+	char inputBfree[8] = "bfree";
+	char inputFd[8] = "fd";
+	char inputExit[8] = "exit";
+	
+	int block_buf1[11];
+	char * buf;
+	fd = tmpfile();
+	buf = (char*)malloc((FILEBLK+DATASTART)*BLOCKSIZ);
+	fseek(fd,0,SEEK_SET);
+	fwrite(buf,1,(FILEBLK+DATASTART)*BLOCKSIZ,fd);//用fd指向buf,大小为1B
+	
+	filsys1.s_nfree = FILEBLK;
+	
+	//把第一组空闲盘块放进空闲盘块堆栈
+	for(i=0;i<NICFREE;i++)
+	{
+		filsys1.s_free[i] = DATASTART+NICFREE-i-1;
+		//filsys1.s_nfree = i+1;
+	}
+	filsys1.s_pfree = NICFREE-1;
+	
+	for(i = NICFREE*2-1;i < FILEBLK;i+=NICFREE)//从30#-21#，40-31#这样以此把缓冲区内容写入空闲盘块。
+	{
+		for(j=0;j<NICFREE;j++)
+			block_buf1[j] = i-j+DATASTART;//写下一组盘块空闲块号
+		block_buf1[NICFREE] = NICFREE;//记录本组的空闲盘块数
+		//把缓冲区内容写到每组空闲盘块的最后一块中
+		bwrite(i-NICFREE+DATASTART,block_buf1);	
+	}
+	//处理最后一组盘块，该盘块可能不足NICFREE块
+	i=i-NICFREE;
+	block_buf1[0]=0;
+	for(j=1;j<FILEBLK-i;j++)
+	{
+		block_buf1[j] = FILEBLK+DATASTART-j;
+	}
+	block_buf1[NICFREE]=j;
+	bwrite(i+DATASTART,block_buf1);
+	
+	//把超级块写入1#
+	fseek (fd,BLOCKSIZ,SEEK_SET);
+	fwrite (&filsys1,1,sizeof(filsys1),fd);
+	//display();
+	do
+	{
+		gets(input);
+		if(strcmp(input, inputFd) == 0){
+			display();
+		}else if(strcmp(input, inputBalloc) == 0){
+			balloc();
+		}else if(strcmp(input, inputBfree) == 0){
+			bfree();
+		}else if(strcmp(input, inputExit) == 0){
+			break;
+		}
+	}while(input);
+	//printf("miaomiaomiao\n");
+	fclose(fd);
+	return 1;
+}
+void bwrite(unsigned int ino,unsigned int *buf)
+{
+	fseek (fd,BLOCKSIZ*ino,SEEK_SET);
+	fwrite(buf,1,BLOCKSIZ,fd);//写一个字节
+}
+void bread(unsigned int ino,unsigned int *buf)
+{
+	fseek(fd,BLOCKSIZ*ino,SEEK_SET);
+	fread(buf, 1, BLOCKSIZ, fd);
+}
+void display()
+{
+	int i;
+	unsigned int block_buf0[BLOCKSIZ / sizeof(int)];
+	
+	printf("filsys.s_nfree:%d\n",filsys1.s_nfree );
+	printf("filsys.s_pfree:%d\n",filsys1.s_pfree );
+	printf("current free :%d#\n",filsys1.s_free[filsys1.s_pfree] );
+	i = 0;
+	while(i <= filsys1.s_pfree && filsys1.s_nfree > 0){
+		printf("filsys.s_free[%d]=%d\n",i,filsys1.s_free[i] );
+		i++;
+	}
+	int lastBLK = filsys1.s_free[0];
+	int free_block_num = NICFREE;
+	while(lastBLK > 0)
+	{
+		bread(lastBLK,block_buf0);
+		free_block_num = block_buf0[NICFREE];
+		if(block_buf0[0]==0)
+		{
+			//free_block_num--;
+			    printf("lastBLK = %d# , free_block_num = %d\n",lastBLK,free_block_num );
+		    for (int i = 0; i <free_block_num; i++){	
+			    printf("block_buf0[%d]=%d\n",i,block_buf0[i] );
+		    }
+		}
+		else
+		{
+			printf("lastBLK = %d# , free_block_num = %d\n",lastBLK,free_block_num );
+			for (int i = 0; i < free_block_num; i++)
+			{	
+				printf("block_buf0[%d]=%d\n",i,block_buf0[i] );
+			}
+		}
+		lastBLK = block_buf0[0];
+	}
+}
+
+void balloc()
+{
+	/*写入超级块
+	 fseek (fd,BLOCKSIZ,SEEK_SET);
+	 fwrite (&filsys1,1,sizeof(filsys1),fd);
+	 */
+	/**读超级块
+	 fseek(fd,BLOCKSIZ,SEEK_SET);
+	 fread(&filsys1,1, sizeof(filsys1), fd);*/
+	 
+	 
+	unsigned int block_buf0[BLOCKSIZ/sizeof(int)];
+	int jump;
+	fseek(fd,BLOCKSIZ,SEEK_SET);//512
+	fread(&filsys1,1, sizeof(filsys1), fd);//read it to filsys1
+	if(filsys1.s_pfree!=0)//空闲盘块数不是0时
+	{
+		printf("balloc=%d\n", filsys1.s_free[filsys1.s_pfree]);
+		count = filsys1.s_free[filsys1.s_pfree];
+		filsys1.s_nfree--;
+		filsys1.s_pfree--;
+		
+		fseek (fd,BLOCKSIZ,SEEK_SET);
+	    fwrite (&filsys1,1,sizeof(filsys1),fd);
+		
+	}else if(filsys1.s_free[0]!=0)
+	{
+		jump = filsys1.s_free[0];
+		bread(jump,block_buf0);
+		
+		printf("balloc=%d\n", filsys1.s_free[0]);
+		count = filsys1.s_free[0];
+		
+		for(int i=0;i<block_buf0[NICFREE];i++)
+		{
+			filsys1.s_free[i] = block_buf0[i];
+			//filsys1.s_nfree = i+1;
+		}
+		filsys1.s_nfree--;
+		filsys1.s_pfree = block_buf0[NICFREE]-1;//栈顶
+		
+		fseek (fd,BLOCKSIZ,SEEK_SET);
+	    fwrite (&filsys1,1,sizeof(filsys1),fd);
+		block_buf0[NICFREE]=0; 
+		bwrite(jump,block_buf0);
+		
+	}else
+	{
+		printf("已经没有空闲块了！\n");
+	}
+}
+
+void bfree()
+{
+	int linknum;
+
+	unsigned int block_buf0[BLOCKSIZ/sizeof(int)];
+	int num;
+	
+	scanf("%d", &num);
+	
+	int i;
+	
+	fseek(fd,BLOCKSIZ,SEEK_SET);
+	fread(&filsys1,1, sizeof(filsys1), fd);
+	
+	if(num > count){
+		printf("还没分配呢！\n");
+		return;
+	}else if(filsys1.s_pfree + 1 < 10)//此栈未满,添加到栈顶，盘块数加一
+	{
+		filsys1.s_nfree++;
+		filsys1.s_pfree++;
+
+		
+		filsys1.s_free[filsys1.s_pfree] = num;
+		
+		fseek(fd,BLOCKSIZ,SEEK_SET);
+		fwrite (&filsys1,1,sizeof(filsys1),fd);
+		printf("free!\n");
+	}else {
+		printf("free!\n");		
+		
+		for(i=0;i<NICFREE;i++)
+		{
+			block_buf0[i]=filsys1.s_free[i];
+		}
+		block_buf0[NICFREE]=NICFREE;
+		bwrite(num,block_buf0);
+		
+		filsys1.s_pfree = 0;
+		filsys1.s_free[0]=num;
+		
+		filsys1.s_nfree ++;//空闲盘块数
+		
+		fseek(fd,BLOCKSIZ,SEEK_SET);
+		fwrite (&filsys1,1,sizeof(filsys1),fd);
+	}
+}
